@@ -6,6 +6,7 @@ export interface Expediente {
   fechaInicio: string;
   fechaVencimiento: string;
   fechaRespuesta: string;
+  cumplido: boolean;
   observacion: string;
   createdAt: number;
 }

@@ -10,8 +10,11 @@ import {
   Trash2, 
   LayoutDashboard,
   ClipboardList,
-  Search
+  Search,
+  Edit2,
+  Download
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { Expediente, DailyReport } from './types';
 import { calculateStatus, formatDate } from './utils/dateUtils';
 
@@ -37,14 +40,16 @@ const ReportCard: React.FC<ReportCardProps> = ({ label, value, color = "text-[#1
 interface ExpedienteRowProps {
   exp: Expediente;
   onDelete: () => void;
+  onEdit: () => void;
+  onToggleCumplido: (id: string) => void;
 }
 
-const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete }) => {
+const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete, onEdit, onToggleCumplido }) => {
   const status = calculateStatus(exp.fechaVencimiento);
   
   const statusConfig = {
-    red: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', label: 'Vencido / Hoy' },
-    amber: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', label: 'Próximo' },
+    red: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', label: 'Vencido' },
+    amber: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', label: 'Próximo / Hoy' },
     green: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', label: 'Vigente' }
   };
 
@@ -56,7 +61,7 @@ const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete }) => {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className="grid grid-cols-1 md:grid-cols-[100px_1fr_1fr_100px_100px_100px_100px_1.5fr_40px] p-4 items-center gap-4 hover:bg-gray-50 transition-colors group"
+      className="grid grid-cols-1 md:grid-cols-[100px_1fr_1fr_100px_100px_100px_80px_100px_1.5fr_40px] p-4 items-center gap-4 hover:bg-gray-50 transition-colors group"
     >
       <div className="font-mono text-xs font-bold">{exp.numero}</div>
       <div className="font-serif italic text-sm truncate" title={exp.asunto}>{exp.asunto}</div>
@@ -73,6 +78,15 @@ const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete }) => {
         <span className="font-bold uppercase text-[8px]">Resp.</span>
         {exp.fechaRespuesta ? formatDate(exp.fechaRespuesta) : '-'}
       </div>
+      <div className="flex justify-center">
+        <input 
+          type="checkbox" 
+          checked={exp.cumplido || false} 
+          onChange={() => onToggleCumplido(exp.id)}
+          className="w-4 h-4 cursor-pointer accent-[#141414]"
+          title="Marcar como cumplido"
+        />
+      </div>
       <div>
         <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border ${config.bg} ${config.text} ${config.border}`}>
           {config.label}
@@ -81,10 +95,22 @@ const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete }) => {
       <div className="text-xs opacity-70 italic line-clamp-2" title={exp.observacion}>
         {exp.observacion || '-'}
       </div>
-      <div className="text-right">
+      <div className="text-right flex items-center justify-end gap-1">
         <button 
-          onClick={onDelete}
-          className="p-2 hover:bg-rose-100 hover:text-rose-600 rounded-sm transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+          onClick={onEdit}
+          className="p-2 hover:bg-indigo-100 text-indigo-600 rounded-sm transition-colors cursor-pointer"
+          title="Editar"
+        >
+          <Edit2 className="w-4 h-4" />
+        </button>
+        <button 
+          onClick={() => {
+            if (window.confirm('¿Está seguro de que desea eliminar este expediente?')) {
+              onDelete();
+            }
+          }}
+          className="p-2 hover:bg-rose-100 text-rose-600 rounded-sm transition-colors cursor-pointer"
+          title="Eliminar"
         >
           <Trash2 className="w-4 h-4" />
         </button>
@@ -96,6 +122,7 @@ const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete }) => {
 export default function App() {
   const [expedientes, setExpedientes] = useState<Expediente[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   
   // Form state
@@ -106,6 +133,7 @@ export default function App() {
     fechaInicio: new Date().toISOString().split('T')[0],
     fechaVencimiento: '',
     fechaRespuesta: '',
+    cumplido: false,
     observacion: ''
   });
 
@@ -128,12 +156,24 @@ export default function App() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const newExpediente: Expediente = {
-      id: crypto.randomUUID(),
-      ...formData,
-      createdAt: Date.now()
-    };
-    setExpedientes([newExpediente, ...expedientes]);
+    
+    if (editingId) {
+      setExpedientes(expedientes.map(exp => 
+        exp.id === editingId ? { ...exp, ...formData } : exp
+      ));
+    } else {
+      const newExpediente: Expediente = {
+        id: crypto.randomUUID(),
+        ...formData,
+        createdAt: Date.now()
+      };
+      setExpedientes([newExpediente, ...expedientes]);
+    }
+
+    resetForm();
+  };
+
+  const resetForm = () => {
     setFormData({
       numero: '',
       asunto: '',
@@ -141,9 +181,62 @@ export default function App() {
       fechaInicio: new Date().toISOString().split('T')[0],
       fechaVencimiento: '',
       fechaRespuesta: '',
+      cumplido: false,
       observacion: ''
     });
+    setEditingId(null);
     setIsFormOpen(false);
+  };
+
+  const startEdit = (exp: Expediente) => {
+    setFormData({
+      numero: exp.numero,
+      asunto: exp.asunto,
+      areaServicio: exp.areaServicio,
+      fechaInicio: exp.fechaInicio,
+      fechaVencimiento: exp.fechaVencimiento,
+      fechaRespuesta: exp.fechaRespuesta || '',
+      cumplido: exp.cumplido || false,
+      observacion: exp.observacion || ''
+    });
+    setEditingId(exp.id);
+    setIsFormOpen(true);
+  };
+
+  const toggleCumplido = (id: string) => {
+    setExpedientes(prev => prev.map(exp => {
+      if (exp.id === id) {
+        const isNowCumplido = !exp.cumplido;
+        return {
+          ...exp,
+          cumplido: isNowCumplido,
+          fechaRespuesta: isNowCumplido ? new Date().toISOString().split('T')[0] : ''
+        };
+      }
+      return exp;
+    }));
+  };
+
+  const exportToExcel = () => {
+    const dataToExport = expedientes.map(exp => ({
+      'Nº Expediente': exp.numero,
+      'Asunto': exp.asunto,
+      'Área/Servicio': exp.areaServicio,
+      'Fecha Inicio': exp.fechaInicio,
+      'Fecha Vencimiento': exp.fechaVencimiento,
+      'Fecha Respuesta': exp.fechaRespuesta || 'N/A',
+      'Cumplido': exp.cumplido ? 'SÍ' : 'NO',
+      'Estado': calculateStatus(exp.fechaVencimiento),
+      'Comentario / Observación': exp.observacion || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Expedientes');
+    
+    // Generate filename with current date
+    const date = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(workbook, `Reporte_Expedientes_USDT_${date}.xlsx`);
   };
 
   const deleteExpediente = (id: string) => {
@@ -173,15 +266,28 @@ export default function App() {
             <div className="bg-[#141414] p-1.5 rounded">
               <ClipboardList className="w-5 h-5 text-[#E4E3E0]" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight uppercase">Gestor de Expedientes</h1>
+            <h1 className="text-xl font-bold tracking-tight uppercase">Seguimiento de Expedientes - USDT</h1>
           </div>
-          <button 
-            onClick={() => setIsFormOpen(true)}
-            className="flex items-center gap-2 bg-[#141414] text-[#E4E3E0] px-4 py-2 rounded-sm hover:bg-opacity-90 transition-all active:scale-95 font-medium text-sm cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            NUEVO EXPEDIENTE
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => {
+                resetForm();
+                setIsFormOpen(true);
+              }}
+              className="flex items-center gap-2 bg-[#141414] text-[#E4E3E0] px-4 py-2 rounded-sm hover:bg-opacity-90 transition-all active:scale-95 font-medium text-sm cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              NUEVO EXPEDIENTE
+            </button>
+            <button 
+              onClick={exportToExcel}
+              className="flex items-center gap-2 border border-[#141414] text-[#141414] px-4 py-2 rounded-sm hover:bg-[#141414] hover:text-[#E4E3E0] transition-all active:scale-95 font-medium text-sm cursor-pointer"
+              title="Exportar a Excel"
+            >
+              <Download className="w-4 h-4" />
+              EXCEL
+            </button>
+          </div>
         </div>
       </header>
 
@@ -200,19 +306,19 @@ export default function App() {
               icon={<FileText className="w-5 h-5" />}
             />
             <ReportCard 
-              label="Al Día" 
+              label="Vigentes" 
               value={report.alDia} 
               color="text-emerald-600"
               icon={<CheckCircle2 className="w-5 h-5" />}
             />
             <ReportCard 
-              label="Próximos a Vencer" 
+              label="Próximos / Hoy" 
               value={report.proximos} 
               color="text-amber-600"
               icon={<Clock className="w-5 h-5" />}
             />
             <ReportCard 
-              label="Retrasados / Hoy" 
+              label="Vencidos" 
               value={report.retrasados} 
               color="text-rose-600"
               icon={<AlertCircle className="w-5 h-5" />}
@@ -241,15 +347,16 @@ export default function App() {
 
           <div className="border border-[#141414] bg-white overflow-hidden">
             {/* Table Header */}
-            <div className="hidden md:grid grid-cols-[100px_1fr_1fr_100px_100px_100px_100px_1.5fr_40px] bg-[#141414] text-[#E4E3E0] text-[10px] font-bold tracking-widest uppercase p-4 gap-4">
+            <div className="hidden md:grid grid-cols-[100px_1fr_1fr_100px_100px_100px_80px_100px_1.5fr_40px] bg-[#141414] text-[#E4E3E0] text-[10px] font-bold tracking-widest uppercase p-4 gap-4">
               <div>Nº Expediente</div>
               <div>Asunto</div>
               <div>Área/Servicio</div>
               <div>Inicio</div>
               <div>Vencimiento</div>
               <div>Respuesta</div>
+              <div className="text-center">Cumplido</div>
               <div>Estado</div>
-              <div>Observación</div>
+              <div>Comentario / Observación</div>
               <div className="text-right"></div>
             </div>
 
@@ -261,6 +368,8 @@ export default function App() {
                       key={exp.id} 
                       exp={exp} 
                       onDelete={() => deleteExpediente(exp.id)} 
+                      onEdit={() => startEdit(exp)}
+                      onToggleCumplido={toggleCumplido}
                     />
                   ))
                 ) : (
@@ -292,8 +401,10 @@ export default function App() {
               className="relative w-full max-w-md bg-[#E4E3E0] border border-[#141414] shadow-2xl overflow-hidden"
             >
               <div className="bg-[#141414] p-4 flex items-center justify-between">
-                <h3 className="text-[#E4E3E0] text-xs font-bold tracking-widest uppercase">Nuevo Registro</h3>
-                <button onClick={() => setIsFormOpen(false)} className="text-[#E4E3E0] opacity-50 hover:opacity-100 cursor-pointer">
+                <h3 className="text-[#E4E3E0] text-xs font-bold tracking-widest uppercase">
+                  {editingId ? 'Editar Registro' : 'Nuevo Registro'}
+                </h3>
+                <button onClick={resetForm} className="text-[#E4E3E0] opacity-50 hover:opacity-100 cursor-pointer">
                   <Plus className="w-5 h-5 rotate-45" />
                 </button>
               </div>
@@ -360,13 +471,30 @@ export default function App() {
                     <input 
                       type="date" 
                       value={formData.fechaRespuesta}
-                      onChange={e => setFormData({...formData, fechaRespuesta: e.target.value})}
+                      onChange={e => setFormData({...formData, fechaRespuesta: e.target.value, cumplido: !!e.target.value})}
                       className="w-full bg-white border border-[#141414] p-2 text-sm focus:outline-none"
                     />
                   </div>
                 </div>
+                <div className="flex items-center gap-2 py-2">
+                  <input 
+                    type="checkbox" 
+                    id="cumplido-form"
+                    checked={formData.cumplido}
+                    onChange={e => {
+                      const isChecked = e.target.checked;
+                      setFormData({
+                        ...formData, 
+                        cumplido: isChecked,
+                        fechaRespuesta: isChecked ? new Date().toISOString().split('T')[0] : ''
+                      });
+                    }}
+                    className="w-4 h-4 cursor-pointer accent-[#141414]"
+                  />
+                  <label htmlFor="cumplido-form" className="text-[10px] font-bold tracking-widest uppercase cursor-pointer">Marcar como Cumplido (Hoy)</label>
+                </div>
                 <div>
-                  <label className="block text-[10px] font-bold tracking-widest uppercase mb-1 opacity-50">Observación</label>
+                  <label className="block text-[10px] font-bold tracking-widest uppercase mb-1 opacity-50">Comentario / Observación</label>
                   <textarea 
                     value={formData.observacion}
                     onChange={e => setFormData({...formData, observacion: e.target.value})}
@@ -378,7 +506,7 @@ export default function App() {
                   type="submit"
                   className="w-full bg-[#141414] text-[#E4E3E0] py-3 text-xs font-bold tracking-widest uppercase hover:bg-opacity-90 transition-all mt-4 cursor-pointer"
                 >
-                  Registrar Expediente
+                  {editingId ? 'Actualizar Expediente' : 'Registrar Expediente'}
                 </button>
               </form>
             </motion.div>
