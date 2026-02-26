@@ -153,25 +153,57 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [apiStatus, setApiStatus] = useState<'ok' | 'error' | 'checking'>('checking');
   const [serverDataCount, setServerDataCount] = useState<number | null>(null);
 
-  const connectSocket = () => {
+  const checkApi = async () => {
+    try {
+      setApiStatus('checking');
+      const res = await fetch('/api/status');
+      if (res.ok) {
+        setApiStatus('ok');
+        return true;
+      }
+      setApiStatus('error');
+      return false;
+    } catch (e) {
+      setApiStatus('error');
+      return false;
+    }
+  };
+
+  const connectSocket = async () => {
     if (socket) {
       socket.disconnect();
     }
     
     setIsConnecting(true);
     setConnectionError(null);
-    console.log('Iniciando conexión socket...');
     
-    const newSocket = io({
-      transports: ['websocket'],
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
+    // Primero verificamos si la API responde
+    const isApiOk = await checkApi();
+    if (!isApiOk) {
+      setConnectionError('API no responde');
+      setIsConnecting(false);
+      return;
+    }
+
+    const socketOptions = {
+      path: '/socket.io/',
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+      rememberUpgrade: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+      timeout: 15000,
       autoConnect: true,
-    });
+      forceNew: true
+    };
+
+    console.log('Iniciando conexión socket con opciones:', socketOptions.transports);
+    
+    const newSocket = io(socketOptions);
     
     setSocket(newSocket);
 
@@ -243,7 +275,11 @@ export default function App() {
 
   // Initialize Socket.io
   useEffect(() => {
-    const s = connectSocket();
+    let s: any;
+    const init = async () => {
+      s = await connectSocket();
+    };
+    init();
     return () => {
       if (s) s.close();
     };
@@ -463,6 +499,9 @@ export default function App() {
               {isConnected ? 'En Línea' : isConnecting ? 'Conectando...' : 'Desconectado'}
               {connectionError && !isConnected && (
                 <span className="ml-1 text-[7px] opacity-50 lowercase">({connectionError})</span>
+              )}
+              {apiStatus === 'error' && !isConnected && (
+                <span className="ml-1 text-[7px] text-rose-600 font-bold">API Error</span>
               )}
               {!isConnected && !isConnecting && (
                 <button 

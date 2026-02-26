@@ -40,9 +40,12 @@ async function startServer() {
   const io = new Server(httpServer, {
     cors: {
       origin: "*",
-      methods: ["GET", "POST"]
+      methods: ["GET", "POST"],
+      credentials: true
     },
-    transports: ["websocket", "polling"]
+    allowEIO3: true,
+    transports: ["polling", "websocket"],
+    connectTimeout: 45000,
   });
 
   let expedientes = loadData();
