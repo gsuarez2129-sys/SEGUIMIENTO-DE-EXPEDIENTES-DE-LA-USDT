@@ -154,6 +154,38 @@ export default function App() {
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [serverDataCount, setServerDataCount] = useState<number | null>(null);
+  const [useRestFallback, setUseRestFallback] = useState(false);
+
+  const fetchExpedientesRest = async () => {
+    try {
+      console.log('Intentando cargar datos vía REST...');
+      const res = await fetch('/api/expedientes');
+      if (res.ok) {
+        const data = await res.json();
+        setExpedientes(data);
+        setServerDataCount(data.length);
+        console.log('Datos cargados con éxito vía REST');
+        return true;
+      }
+    } catch (e) {
+      console.error('Error en carga REST:', e);
+    }
+    return false;
+  };
+
+  const saveExpedientesRest = async (data: Expediente[]) => {
+    try {
+      const res = await fetch('/api/expedientes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return res.ok;
+    } catch (e) {
+      console.error('Error al guardar vía REST:', e);
+      return false;
+    }
+  };
 
   const connectSocket = () => {
     if (socket) {
@@ -164,13 +196,15 @@ export default function App() {
     setConnectionError(null);
     console.log('Iniciando conexión socket profesional...');
     
-    // Dejamos que socket.io maneje la URL automáticamente (relativa al origen)
-    const newSocket = io({
-      transports: ['polling', 'websocket'],
-      reconnectionAttempts: Infinity,
+    // Intentamos cargar datos vía REST primero para que la app sea funcional de inmediato
+    fetchExpedientesRest();
+
+    const newSocket = io(window.location.origin, {
+      path: '/socket.io/',
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 5,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
+      timeout: 10000,
       autoConnect: true,
     });
     
@@ -181,12 +215,18 @@ export default function App() {
       setIsConnected(true);
       setIsConnecting(false);
       setConnectionError(null);
+      setUseRestFallback(false);
     });
 
     newSocket.on('connect_error', (err) => {
-      console.error('Error de conexión:', err.message);
-      setConnectionError(`Error: ${err.message}`);
-      // No detenemos isConnecting porque socket.io reintenta automáticamente
+      console.error('Error de conexión socket:', err.message);
+      setConnectionError(`Socket: ${err.message}`);
+      
+      // Si el socket falla repetidamente, activamos el modo fallback REST
+      if (!isConnected) {
+        setUseRestFallback(true);
+        setIsConnecting(false);
+      }
     });
 
     newSocket.on('reconnect', (attemptNumber) => {
@@ -194,11 +234,7 @@ export default function App() {
       setIsConnected(true);
       setIsConnecting(false);
       setConnectionError(null);
-    });
-
-    newSocket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('Intento de reconexión:', attemptNumber);
-      setIsConnecting(true);
+      setUseRestFallback(false);
     });
 
     newSocket.on('disconnect', (reason) => {
@@ -212,24 +248,6 @@ export default function App() {
     newSocket.on('init', (initialData: Expediente[]) => {
       console.log('Received initial data:', initialData.length);
       setServerDataCount(initialData.length);
-      
-      if (initialData.length === 0) {
-        const saved = localStorage.getItem('expedientes');
-        if (saved) {
-          try {
-            const localData = JSON.parse(saved);
-            if (localData && Array.isArray(localData) && localData.length > 0) {
-              console.log('Auto-migrating local data to server...');
-              setExpedientes(localData);
-              newSocket.emit('update_expedientes', localData);
-              return;
-            }
-          } catch (e) {
-            console.error('Error parsing local data', e);
-          }
-        }
-      }
-      
       setExpedientes(initialData);
     });
 
@@ -286,8 +304,11 @@ export default function App() {
 
   const syncWithServer = (newExpedientes: Expediente[]) => {
     setExpedientes(newExpedientes);
-    if (socket) {
+    localStorage.setItem('expedientes', JSON.stringify(newExpedientes));
+    if (isConnected && socket) {
       socket.emit('update_expedientes', newExpedientes);
+    } else if (useRestFallback) {
+      saveExpedientesRest(newExpedientes);
     }
   };
 
@@ -462,8 +483,8 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-tight uppercase">Seguimiento de Expedientes - USDT</h1>
             <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-tighter border ${isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : isConnecting ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
               <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : isConnecting ? 'bg-amber-500 animate-bounce' : 'bg-rose-500'}`} />
-              {isConnected ? 'En Línea' : isConnecting ? 'Conectando...' : 'Desconectado'}
-              {connectionError && !isConnected && (
+              {isConnected ? 'En Línea' : isConnecting ? 'Conectando...' : useRestFallback ? 'Modo Seguro (REST)' : 'Desconectado'}
+              {connectionError && !isConnected && !useRestFallback && (
                 <span className="ml-1 text-[7px] opacity-50 lowercase">({connectionError})</span>
               )}
               {!isConnected && !isConnecting && (

@@ -101,6 +101,21 @@ async function startServer() {
     });
   });
 
+  app.get("/api/expedientes", (req, res) => {
+    res.json(expedientes);
+  });
+
+  app.post("/api/expedientes", express.json(), (req, res) => {
+    if (Array.isArray(req.body)) {
+      expedientes = req.body;
+      saveData(expedientes);
+      io.emit("sync_expedientes", expedientes);
+      res.json({ success: true, count: expedientes.length });
+    } else {
+      res.status(400).json({ error: "Invalid data format" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
