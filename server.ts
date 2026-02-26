@@ -91,9 +91,13 @@ async function startServer() {
   });
 
   // API routes
-  app.get("/health", (req, res) => res.send("OK"));
+  app.get("/health", (req, res) => {
+    console.log("[Server] Health check requested");
+    res.send("OK");
+  });
   
   app.get("/api/status", (req, res) => {
+    console.log("[Server] Status check requested");
     res.json({ 
       status: "ok",
       clients: io.engine.clientsCount,
@@ -102,6 +106,7 @@ async function startServer() {
   });
 
   app.get("/api/expedientes", (req, res) => {
+    console.log("[Server] GET /api/expedientes requested");
     res.json(expedientes);
   });
 

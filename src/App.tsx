@@ -155,20 +155,22 @@ export default function App() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [serverDataCount, setServerDataCount] = useState<number | null>(null);
   const [useRestFallback, setUseRestFallback] = useState(false);
+  const [transportType, setTransportType] = useState<'websocket' | 'polling' | 'none'>('none');
 
   const fetchExpedientesRest = async () => {
     try {
-      console.log('Intentando cargar datos vía REST...');
+      console.log('[REST] Intentando cargar datos...');
       const res = await fetch('/api/expedientes');
       if (res.ok) {
         const data = await res.json();
         setExpedientes(data);
         setServerDataCount(data.length);
-        console.log('Datos cargados con éxito vía REST');
+        console.log('[REST] Datos cargados con éxito. Registros:', data.length);
         return true;
       }
+      console.error('[REST] Error en respuesta:', res.status);
     } catch (e) {
-      console.error('Error en carga REST:', e);
+      console.error('[REST] Error de red:', e);
     }
     return false;
   };
@@ -182,7 +184,7 @@ export default function App() {
       });
       return res.ok;
     } catch (e) {
-      console.error('Error al guardar vía REST:', e);
+      console.error('[REST] Error al guardar:', e);
       return false;
     }
   };
@@ -194,43 +196,45 @@ export default function App() {
     
     setIsConnecting(true);
     setConnectionError(null);
-    console.log('Iniciando conexión socket profesional...');
+    console.log('[Socket] Iniciando conexión profesional...');
     
-    // Intentamos cargar datos vía REST primero para que la app sea funcional de inmediato
+    // Carga inicial vía REST para disponibilidad inmediata
     fetchExpedientesRest();
 
-    const newSocket = io(window.location.origin, {
-      path: '/socket.io/',
+    // Configuración experta: Intentamos WebSocket primero, si falla Socket.io bajará a Polling automáticamente
+    // o podemos manejarlo nosotros para mayor control.
+    const newSocket = io({
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      timeout: 10000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      timeout: 15000,
       autoConnect: true,
+      forceNew: true
     });
     
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
-      console.log('Conectado al servidor. ID:', newSocket.id);
+      const transport = (newSocket as any).io?.engine?.transport?.name || 'unknown';
+      console.log(`[Socket] Conectado con éxito. ID: ${newSocket.id} | Transporte: ${transport}`);
       setIsConnected(true);
       setIsConnecting(false);
       setConnectionError(null);
       setUseRestFallback(false);
+      setTransportType(transport as any);
     });
 
     newSocket.on('connect_error', (err) => {
-      console.error('Error de conexión socket:', err.message);
-      setConnectionError(`Socket: ${err.message}`);
+      console.error('[Socket] Error de conexión:', err.message);
+      setConnectionError(err.message);
       
-      // Si el socket falla repetidamente, activamos el modo fallback REST
-      if (!isConnected) {
-        setUseRestFallback(true);
-        setIsConnecting(false);
-      }
+      // Si falla, activamos el modo REST para no bloquear al usuario
+      setUseRestFallback(true);
+      // No detenemos isConnecting para permitir que socket.io siga intentando en segundo plano
     });
 
     newSocket.on('reconnect', (attemptNumber) => {
-      console.log('Reconectado tras', attemptNumber, 'intentos');
+      console.log('[Socket] Reconectado tras', attemptNumber, 'intentos');
       setIsConnected(true);
       setIsConnecting(false);
       setConnectionError(null);
@@ -238,21 +242,22 @@ export default function App() {
     });
 
     newSocket.on('disconnect', (reason) => {
-      console.log('Desconectado. Razón:', reason);
+      console.log('[Socket] Desconectado. Razón:', reason);
       setIsConnected(false);
-      if (reason === 'io server disconnect' || reason === 'transport close' || reason === 'transport error') {
+      setTransportType('none');
+      if (reason === 'io server disconnect' || reason === 'transport close') {
         setIsConnecting(true);
       }
     });
 
     newSocket.on('init', (initialData: Expediente[]) => {
-      console.log('Received initial data:', initialData.length);
+      console.log('[Socket] Datos iniciales recibidos:', initialData.length);
       setServerDataCount(initialData.length);
       setExpedientes(initialData);
     });
 
     newSocket.on('sync_expedientes', (syncedData: Expediente[]) => {
-      console.log('Received synced data:', syncedData.length);
+      console.log('[Socket] Sincronización recibida:', syncedData.length);
       setServerDataCount(syncedData.length);
       setExpedientes(syncedData);
       localStorage.setItem('expedientes', JSON.stringify(syncedData));
@@ -483,11 +488,11 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-tight uppercase">Seguimiento de Expedientes - USDT</h1>
             <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-tighter border ${isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : isConnecting ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
               <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : isConnecting ? 'bg-amber-500 animate-bounce' : 'bg-rose-500'}`} />
-              {isConnected ? 'En Línea' : isConnecting ? 'Conectando...' : useRestFallback ? 'Modo Seguro (REST)' : 'Desconectado'}
-              {connectionError && !isConnected && !useRestFallback && (
-                <span className="ml-1 text-[7px] opacity-50 lowercase">({connectionError})</span>
+              {isConnected ? `En Línea (${transportType})` : isConnecting ? 'Conectando...' : useRestFallback ? 'Modo Seguro (REST)' : 'Desconectado'}
+              {connectionError && !isConnected && (
+                <span className="ml-1 text-[7px] opacity-70 lowercase">({connectionError})</span>
               )}
-              {!isConnected && !isConnecting && (
+              {!isConnected && (
                 <button 
                   onClick={connectSocket}
                   className="ml-1 underline cursor-pointer hover:text-rose-900"
