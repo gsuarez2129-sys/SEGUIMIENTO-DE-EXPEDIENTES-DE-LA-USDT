@@ -15,6 +15,7 @@ import {
   Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import io from 'socket.io-client';
 import { Expediente, DailyReport } from './types';
 import { calculateStatus, formatDate } from './utils/dateUtils';
 
@@ -41,8 +42,22 @@ interface ExpedienteRowProps {
   exp: Expediente;
   onDelete: () => void;
   onEdit: () => void;
-  onToggleCumplido: (id: string) => void;
+  onToggleCumplido: (id: string, area: string) => void;
 }
+
+const AREAS_SERVICIOS = [
+  "SUST-Servicio de Farmacia",
+  "SUST-Servicio de Nutrición y Dietética",
+  "SUSD-Servicio de Hemoterapia y Banco de Sangre",
+  "SUSD-Servicio de Patología Clínica",
+  "SUSD-Servicio de Anatomía Patológica",
+  "SUSD-Servicio de Diagnóstico por Imágenes",
+  "SUSD-Servicio de Genética",
+  "SUASP-Área Referencia y Contrareferencia",
+  "SUASP-Área de Telesalud",
+  "SUASP-Servicio de Admisión",
+  "SUASP-Área de Trabajo Social"
+];
 
 const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete, onEdit, onToggleCumplido }) => {
   const status = calculateStatus(exp.fechaVencimiento);
@@ -61,11 +76,34 @@ const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete, onEdit, on
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className="grid grid-cols-1 md:grid-cols-[100px_1fr_1fr_100px_100px_100px_80px_100px_1.5fr_40px] p-4 items-center gap-4 hover:bg-gray-50 transition-colors group"
+      className="grid grid-cols-1 md:grid-cols-[100px_1fr_1.2fr_100px_80px_80px_80px_1.2fr_40px] p-4 items-center gap-4 hover:bg-gray-50 transition-colors group"
     >
       <div className="font-mono text-xs font-bold">{exp.numero}</div>
       <div className="font-serif italic text-sm truncate" title={exp.asunto}>{exp.asunto}</div>
-      <div className="text-xs opacity-70">{exp.areaServicio}</div>
+      <div className="flex flex-col">
+        {exp.areaServicio.map((item) => (
+          <div key={item.area} className="h-10 flex items-center border-b border-gray-100 last:border-0">
+            <div className="text-[9px] font-bold opacity-70 leading-tight">{item.area}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-col">
+        {exp.areaServicio.map((item) => (
+          <div key={item.area} className="h-10 flex flex-col justify-center border-b border-gray-100 last:border-0">
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox" 
+                checked={item.cumplido} 
+                onChange={() => onToggleCumplido(exp.id, item.area)}
+                className="w-3 h-3 cursor-pointer accent-[#141414]"
+              />
+              <span className="text-[8px] opacity-50">
+                {item.fechaRespuesta ? formatDate(item.fechaRespuesta) : 'Pend.'}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
       <div className="text-[10px] opacity-60 flex flex-col">
         <span className="font-bold uppercase text-[8px]">Inicio</span>
         {formatDate(exp.fechaInicio)}
@@ -73,19 +111,6 @@ const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete, onEdit, on
       <div className="text-[10px] opacity-60 flex flex-col">
         <span className="font-bold uppercase text-[8px]">Venc.</span>
         {formatDate(exp.fechaVencimiento)}
-      </div>
-      <div className="text-[10px] opacity-60 flex flex-col">
-        <span className="font-bold uppercase text-[8px]">Resp.</span>
-        {exp.fechaRespuesta ? formatDate(exp.fechaRespuesta) : '-'}
-      </div>
-      <div className="flex justify-center">
-        <input 
-          type="checkbox" 
-          checked={exp.cumplido || false} 
-          onChange={() => onToggleCumplido(exp.id)}
-          className="w-4 h-4 cursor-pointer accent-[#141414]"
-          title="Marcar como cumplido"
-        />
       </div>
       <div>
         <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border ${config.bg} ${config.text} ${config.border}`}>
@@ -124,20 +149,118 @@ export default function App() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  
+  const [socket, setSocket] = useState<any>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [serverDataCount, setServerDataCount] = useState<number | null>(null);
+
+  // Initialize Socket.io
+  useEffect(() => {
+    const newSocket = io({
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 15,
+      timeout: 20000
+    });
+    
+    setSocket(newSocket);
+
+    newSocket.on('connect', () => {
+      console.log('Connected to server');
+      setIsConnected(true);
+    });
+
+    newSocket.on('disconnect', () => {
+      console.log('Disconnected from server');
+      setIsConnected(false);
+    });
+
+    newSocket.on('init', (initialData: Expediente[]) => {
+      console.log('Received initial data:', initialData.length);
+      setServerDataCount(initialData.length);
+      
+      // Migration logic: If server is empty but local has data, sync local to server
+      if (initialData.length === 0) {
+        const saved = localStorage.getItem('expedientes');
+        if (saved) {
+          try {
+            const localData = JSON.parse(saved);
+            if (localData && Array.isArray(localData) && localData.length > 0) {
+              console.log('Auto-migrating local data to server...');
+              setExpedientes(localData);
+              newSocket.emit('update_expedientes', localData);
+              return;
+            }
+          } catch (e) {
+            console.error('Error parsing local data', e);
+          }
+        }
+      }
+      
+      setExpedientes(initialData);
+    });
+
+    newSocket.on('sync_expedientes', (syncedData: Expediente[]) => {
+      console.log('Received synced data:', syncedData.length);
+      setServerDataCount(syncedData.length);
+      setExpedientes(syncedData);
+      localStorage.setItem('expedientes', JSON.stringify(syncedData));
+    });
+
+    return () => {
+      newSocket.close();
+    };
+  }, []);
+
+  const uploadLocalToServer = () => {
+    const saved = localStorage.getItem('expedientes');
+    if (saved && socket) {
+      try {
+        const localData = JSON.parse(saved);
+        if (confirm(`¿Desea subir ${localData.length} expedientes locales al servidor? Esto sobrescribirá los datos en la nube.`)) {
+          socket.emit('update_expedientes', localData);
+          alert('Datos enviados al servidor con éxito.');
+        }
+      } catch (e) {
+        alert('Error al leer datos locales.');
+      }
+    } else {
+      alert('No hay datos locales para subir o no hay conexión.');
+    }
+  };
+
+  const forceSync = () => {
+    if (socket) {
+      socket.emit('get_latest'); // We'll add this handler to server
+    } else {
+      window.location.reload();
+    }
+  };
+
+  const hardRefresh = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('t', Date.now().toString());
+    window.location.href = url.toString();
+  };
+
+  // Sync with server on change
+  const syncWithServer = (newExpedientes: Expediente[]) => {
+    setExpedientes(newExpedientes);
+    if (socket) {
+      socket.emit('update_expedientes', newExpedientes);
+    }
+  };
+
   // Form state
   const [formData, setFormData] = useState({
     numero: '',
     asunto: '',
-    areaServicio: '',
+    areaServicio: [] as string[],
     fechaInicio: new Date().toISOString().split('T')[0],
     fechaVencimiento: '',
-    fechaRespuesta: '',
-    cumplido: false,
     observacion: ''
   });
 
-  // Load from local storage
+  // Load from local storage - REMOVED for WebSocket sync
+  /*
   useEffect(() => {
     const saved = localStorage.getItem('expedientes');
     if (saved) {
@@ -153,23 +276,39 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('expedientes', JSON.stringify(expedientes));
   }, [expedientes]);
+  */
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
+    let newExpedientes: Expediente[];
     if (editingId) {
-      setExpedientes(expedientes.map(exp => 
-        exp.id === editingId ? { ...exp, ...formData } : exp
-      ));
+      newExpedientes = expedientes.map(exp => {
+        if (exp.id === editingId) {
+          // Merge existing area statuses with new selections
+          const updatedAreas = formData.areaServicio.map(areaName => {
+            const existing = exp.areaServicio.find(a => a.area === areaName);
+            return existing || { area: areaName, cumplido: false, fechaRespuesta: '' };
+          });
+          return { ...exp, ...formData, areaServicio: updatedAreas };
+        }
+        return exp;
+      });
     } else {
       const newExpediente: Expediente = {
         id: crypto.randomUUID(),
         ...formData,
+        areaServicio: formData.areaServicio.map(area => ({
+          area,
+          cumplido: false,
+          fechaRespuesta: ''
+        })),
         createdAt: Date.now()
       };
-      setExpedientes([newExpediente, ...expedientes]);
+      newExpedientes = [newExpediente, ...expedientes];
     }
 
+    syncWithServer(newExpedientes);
     resetForm();
   };
 
@@ -177,11 +316,9 @@ export default function App() {
     setFormData({
       numero: '',
       asunto: '',
-      areaServicio: '',
+      areaServicio: [],
       fechaInicio: new Date().toISOString().split('T')[0],
       fechaVencimiento: '',
-      fechaRespuesta: '',
-      cumplido: false,
       observacion: ''
     });
     setEditingId(null);
@@ -192,43 +329,54 @@ export default function App() {
     setFormData({
       numero: exp.numero,
       asunto: exp.asunto,
-      areaServicio: exp.areaServicio,
+      areaServicio: exp.areaServicio.map(a => a.area),
       fechaInicio: exp.fechaInicio,
       fechaVencimiento: exp.fechaVencimiento,
-      fechaRespuesta: exp.fechaRespuesta || '',
-      cumplido: exp.cumplido || false,
       observacion: exp.observacion || ''
     });
     setEditingId(exp.id);
     setIsFormOpen(true);
   };
 
-  const toggleCumplido = (id: string) => {
-    setExpedientes(prev => prev.map(exp => {
+  const toggleCumplido = (id: string, areaName: string) => {
+    const newExpedientes = expedientes.map(exp => {
       if (exp.id === id) {
-        const isNowCumplido = !exp.cumplido;
-        return {
-          ...exp,
-          cumplido: isNowCumplido,
-          fechaRespuesta: isNowCumplido ? new Date().toISOString().split('T')[0] : ''
-        };
+        const updatedAreas = exp.areaServicio.map(a => {
+          if (a.area === areaName) {
+            const isNowCumplido = !a.cumplido;
+            return {
+              ...a,
+              cumplido: isNowCumplido,
+              fechaRespuesta: isNowCumplido ? new Date().toISOString().split('T')[0] : ''
+            };
+          }
+          return a;
+        });
+        return { ...exp, areaServicio: updatedAreas };
       }
       return exp;
-    }));
+    });
+    syncWithServer(newExpedientes);
   };
 
   const exportToExcel = () => {
-    const dataToExport = expedientes.map(exp => ({
-      'Nº Expediente': exp.numero,
-      'Asunto': exp.asunto,
-      'Área/Servicio': exp.areaServicio,
-      'Fecha Inicio': exp.fechaInicio,
-      'Fecha Vencimiento': exp.fechaVencimiento,
-      'Fecha Respuesta': exp.fechaRespuesta || 'N/A',
-      'Cumplido': exp.cumplido ? 'SÍ' : 'NO',
-      'Estado': calculateStatus(exp.fechaVencimiento),
-      'Comentario / Observación': exp.observacion || ''
-    }));
+    const dataToExport: any[] = [];
+    
+    expedientes.forEach(exp => {
+      exp.areaServicio.forEach(areaItem => {
+        dataToExport.push({
+          'Nº Expediente': exp.numero,
+          'Asunto': exp.asunto,
+          'Área/Servicio': areaItem.area,
+          'Fecha Inicio': exp.fechaInicio,
+          'Fecha Vencimiento': exp.fechaVencimiento,
+          'Fecha Respuesta': areaItem.fechaRespuesta || 'Pendiente',
+          'Cumplido': areaItem.cumplido ? 'SÍ' : 'NO',
+          'Estado General': calculateStatus(exp.fechaVencimiento),
+          'Comentario / Observación': exp.observacion || ''
+        });
+      });
+    });
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
@@ -240,7 +388,8 @@ export default function App() {
   };
 
   const deleteExpediente = (id: string) => {
-    setExpedientes(expedientes.filter(e => e.id !== id));
+    const newExpedientes = expedientes.filter(e => e.id !== id);
+    syncWithServer(newExpedientes);
   };
 
   const filteredExpedientes = expedientes.filter(e => 
@@ -250,8 +399,10 @@ export default function App() {
 
   const report: DailyReport = expedientes.reduce((acc, curr) => {
     const status = calculateStatus(curr.fechaVencimiento);
+    const allCumplido = curr.areaServicio.every(a => a.cumplido);
+    
     acc.total++;
-    if (status === 'green') acc.alDia++;
+    if (allCumplido || status === 'green') acc.alDia++;
     else if (status === 'amber') acc.proximos++;
     else acc.retrasados++;
     return acc;
@@ -267,6 +418,36 @@ export default function App() {
               <ClipboardList className="w-5 h-5 text-[#E4E3E0]" />
             </div>
             <h1 className="text-xl font-bold tracking-tight uppercase">Seguimiento de Expedientes - USDT</h1>
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-tighter border ${isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+              {isConnected ? 'En Línea' : 'Desconectado'}
+            </div>
+            <div className="flex items-center gap-1 bg-white/50 px-2 py-0.5 rounded border border-[#141414]/10">
+              <span className="text-[8px] font-bold opacity-50 uppercase">Nube:</span>
+              <span className="text-[8px] font-mono font-bold">{serverDataCount !== null ? serverDataCount : '?'}</span>
+            </div>
+            <button 
+              onClick={uploadLocalToServer}
+              className="p-1 hover:bg-indigo-100 text-indigo-600 rounded-full transition-colors"
+              title="Subir datos locales a la nube"
+            >
+              <Download className="w-3 h-3 rotate-180" />
+            </button>
+            <button 
+              onClick={forceSync}
+              className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+              title="Forzar Sincronización"
+            >
+              <Clock className={`w-3 h-3 opacity-50 ${!isConnected ? 'text-rose-500' : ''}`} />
+            </button>
+            <button 
+              onClick={hardRefresh}
+              className="p-1 hover:bg-rose-100 text-rose-400 rounded-full transition-colors"
+              title="Limpiar Caché y Recargar"
+            >
+              <AlertCircle className="w-3 h-3" />
+            </button>
+            <span className="text-[8px] opacity-30 font-mono">v1.3</span>
           </div>
           <div className="flex items-center gap-2">
             <button 
@@ -347,14 +528,13 @@ export default function App() {
 
           <div className="border border-[#141414] bg-white overflow-hidden">
             {/* Table Header */}
-            <div className="hidden md:grid grid-cols-[100px_1fr_1fr_100px_100px_100px_80px_100px_1.5fr_40px] bg-[#141414] text-[#E4E3E0] text-[10px] font-bold tracking-widest uppercase p-4 gap-4">
+            <div className="hidden md:grid grid-cols-[100px_1fr_1.2fr_100px_80px_80px_80px_1.2fr_40px] bg-[#141414] text-[#E4E3E0] text-[10px] font-bold tracking-widest uppercase p-4 gap-4">
               <div>Nº Expediente</div>
               <div>Asunto</div>
-              <div>Área/Servicio</div>
+              <div>Área / Servicio</div>
+              <div>Cumplido</div>
               <div>Inicio</div>
               <div>Vencimiento</div>
-              <div>Respuesta</div>
-              <div className="text-center">Cumplido</div>
               <div>Estado</div>
               <div>Comentario / Observación</div>
               <div className="text-right"></div>
@@ -423,15 +603,28 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold tracking-widest uppercase mb-1 opacity-50">Área / Servicio</label>
-                    <input 
-                      required
-                      type="text" 
-                      value={formData.areaServicio}
-                      onChange={e => setFormData({...formData, areaServicio: e.target.value})}
-                      className="w-full bg-white border border-[#141414] p-2 text-sm focus:outline-none"
-                      placeholder="Ej. Legal, RRHH"
-                    />
+                    <label className="block text-[10px] font-bold tracking-widest uppercase mb-1 opacity-50">Área / Servicio (Selección Múltiple)</label>
+                    <div className="w-full bg-white border border-[#141414] h-32 overflow-y-auto p-1">
+                      {AREAS_SERVICIOS.map((area) => (
+                        <label key={area} className="flex items-center gap-2 p-1 hover:bg-gray-50 cursor-pointer text-[10px]">
+                          <input 
+                            type="checkbox"
+                            checked={formData.areaServicio.includes(area)}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setFormData(prev => ({
+                                ...prev,
+                                areaServicio: checked 
+                                  ? [...prev.areaServicio, area]
+                                  : prev.areaServicio.filter(a => a !== area)
+                              }));
+                            }}
+                            className="w-3 h-3 accent-[#141414]"
+                          />
+                          <span className="truncate">{area}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 </div>
                 <div>
@@ -445,7 +638,7 @@ export default function App() {
                     placeholder="Descripción breve del trámite"
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold tracking-widest uppercase mb-1 opacity-50">Inicio</label>
                     <input 
@@ -466,32 +659,6 @@ export default function App() {
                       className="w-full bg-white border border-[#141414] p-2 text-sm focus:outline-none"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold tracking-widest uppercase mb-1 opacity-50">Respuesta</label>
-                    <input 
-                      type="date" 
-                      value={formData.fechaRespuesta}
-                      onChange={e => setFormData({...formData, fechaRespuesta: e.target.value, cumplido: !!e.target.value})}
-                      className="w-full bg-white border border-[#141414] p-2 text-sm focus:outline-none"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 py-2">
-                  <input 
-                    type="checkbox" 
-                    id="cumplido-form"
-                    checked={formData.cumplido}
-                    onChange={e => {
-                      const isChecked = e.target.checked;
-                      setFormData({
-                        ...formData, 
-                        cumplido: isChecked,
-                        fechaRespuesta: isChecked ? new Date().toISOString().split('T')[0] : ''
-                      });
-                    }}
-                    className="w-4 h-4 cursor-pointer accent-[#141414]"
-                  />
-                  <label htmlFor="cumplido-form" className="text-[10px] font-bold tracking-widest uppercase cursor-pointer">Marcar como Cumplido (Hoy)</label>
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold tracking-widest uppercase mb-1 opacity-50">Comentario / Observación</label>

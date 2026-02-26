@@ -1,12 +1,16 @@
+export interface AreaStatus {
+  area: string;
+  cumplido: boolean;
+  fechaRespuesta: string;
+}
+
 export interface Expediente {
   id: string;
   numero: string;
   asunto: string;
-  areaServicio: string;
+  areaServicio: AreaStatus[];
   fechaInicio: string;
   fechaVencimiento: string;
-  fechaRespuesta: string;
-  cumplido: boolean;
   observacion: string;
   createdAt: number;
 }
