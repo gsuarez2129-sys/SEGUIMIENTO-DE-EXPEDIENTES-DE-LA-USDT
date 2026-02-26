@@ -151,26 +151,52 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [socket, setSocket] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(true);
   const [serverDataCount, setServerDataCount] = useState<number | null>(null);
 
   // Initialize Socket.io
   useEffect(() => {
+    console.log('Initializing socket connection...');
+    // Use default io() which handles relative paths and ports correctly
     const newSocket = io({
       transports: ['polling', 'websocket'],
-      reconnectionAttempts: 15,
-      timeout: 20000
+      reconnectionAttempts: 20,
+      reconnectionDelay: 1000,
+      timeout: 30000,
+      autoConnect: true
     });
     
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
-      console.log('Connected to server');
+      console.log('Connected to server with ID:', newSocket.id);
       setIsConnected(true);
+      setIsConnecting(false);
     });
 
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from server');
+    newSocket.on('connect_error', (err) => {
+      console.error('Socket connection error:', err.message);
       setIsConnected(false);
+      setIsConnecting(false);
+    });
+
+    newSocket.on('reconnect', (attemptNumber) => {
+      console.log('Reconnected to server after', attemptNumber, 'attempts');
+      setIsConnected(true);
+      setIsConnecting(false);
+    });
+
+    newSocket.on('reconnect_attempt', (attemptNumber) => {
+      console.log('Attempting to reconnect:', attemptNumber);
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('Disconnected from server. Reason:', reason);
+      setIsConnected(false);
+      if (reason === 'io server disconnect') {
+        // the disconnection was initiated by the server, you need to reconnect manually
+        newSocket.connect();
+      }
     });
 
     newSocket.on('init', (initialData: Expediente[]) => {
@@ -233,12 +259,6 @@ export default function App() {
     } else {
       window.location.reload();
     }
-  };
-
-  const hardRefresh = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('t', Date.now().toString());
-    window.location.href = url.toString();
   };
 
   // Sync with server on change
@@ -418,9 +438,9 @@ export default function App() {
               <ClipboardList className="w-5 h-5 text-[#E4E3E0]" />
             </div>
             <h1 className="text-xl font-bold tracking-tight uppercase">Seguimiento de Expedientes - USDT</h1>
-            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-tighter border ${isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              {isConnected ? 'En Línea' : 'Desconectado'}
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-tighter border ${isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : isConnecting ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : isConnecting ? 'bg-amber-500 animate-bounce' : 'bg-rose-500'}`} />
+              {isConnected ? 'En Línea' : isConnecting ? 'Conectando...' : 'Desconectado'}
             </div>
             <div className="flex items-center gap-1 bg-white/50 px-2 py-0.5 rounded border border-[#141414]/10">
               <span className="text-[8px] font-bold opacity-50 uppercase">Nube:</span>
@@ -439,13 +459,6 @@ export default function App() {
               title="Forzar Sincronización"
             >
               <Clock className={`w-3 h-3 opacity-50 ${!isConnected ? 'text-rose-500' : ''}`} />
-            </button>
-            <button 
-              onClick={hardRefresh}
-              className="p-1 hover:bg-rose-100 text-rose-400 rounded-full transition-colors"
-              title="Limpiar Caché y Recargar"
-            >
-              <AlertCircle className="w-3 h-3" />
             </button>
             <span className="text-[8px] opacity-30 font-mono">v1.3</span>
           </div>

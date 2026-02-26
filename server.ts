@@ -41,6 +41,9 @@ async function startServer() {
     cors: {
       origin: "*",
     },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    allowEIO3: true
   });
 
   let expedientes = loadData();
