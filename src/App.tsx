@@ -154,16 +154,21 @@ export default function App() {
   const [isConnecting, setIsConnecting] = useState(true);
   const [serverDataCount, setServerDataCount] = useState<number | null>(null);
 
-  // Initialize Socket.io
-  useEffect(() => {
+  const connectSocket = () => {
+    if (socket) {
+      socket.disconnect();
+    }
+    
+    setIsConnecting(true);
     console.log('Initializing socket connection...');
-    // Use default io() which handles relative paths and ports correctly
-    const newSocket = io({
-      transports: ['polling', 'websocket'],
-      reconnectionAttempts: 20,
-      reconnectionDelay: 1000,
-      timeout: 30000,
-      autoConnect: true
+    
+    const newSocket = io(window.location.origin, {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      timeout: 20000,
+      autoConnect: true,
+      forceNew: true
     });
     
     setSocket(newSocket);
@@ -176,8 +181,7 @@ export default function App() {
 
     newSocket.on('connect_error', (err) => {
       console.error('Socket connection error:', err.message);
-      setIsConnected(false);
-      setIsConnecting(false);
+      // Don't set isConnecting to false here, let it retry
     });
 
     newSocket.on('reconnect', (attemptNumber) => {
@@ -188,14 +192,15 @@ export default function App() {
 
     newSocket.on('reconnect_attempt', (attemptNumber) => {
       console.log('Attempting to reconnect:', attemptNumber);
+      setIsConnecting(true);
     });
 
     newSocket.on('disconnect', (reason) => {
       console.log('Disconnected from server. Reason:', reason);
       setIsConnected(false);
-      if (reason === 'io server disconnect') {
-        // the disconnection was initiated by the server, you need to reconnect manually
-        newSocket.connect();
+      if (reason === 'io server disconnect' || reason === 'transport close') {
+        setIsConnecting(true);
+        setTimeout(() => newSocket.connect(), 1000);
       }
     });
 
@@ -203,7 +208,6 @@ export default function App() {
       console.log('Received initial data:', initialData.length);
       setServerDataCount(initialData.length);
       
-      // Migration logic: If server is empty but local has data, sync local to server
       if (initialData.length === 0) {
         const saved = localStorage.getItem('expedientes');
         if (saved) {
@@ -231,8 +235,14 @@ export default function App() {
       localStorage.setItem('expedientes', JSON.stringify(syncedData));
     });
 
+    return newSocket;
+  };
+
+  // Initialize Socket.io
+  useEffect(() => {
+    const s = connectSocket();
     return () => {
-      newSocket.close();
+      if (s) s.close();
     };
   }, []);
 
@@ -262,6 +272,13 @@ export default function App() {
   };
 
   // Sync with server on change
+  const copyAppLink = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(() => {
+      alert('Enlace copiado al portapapeles. Puedes abrirlo en otros ordenadores.');
+    });
+  };
+
   const syncWithServer = (newExpedientes: Expediente[]) => {
     setExpedientes(newExpedientes);
     if (socket) {
@@ -441,7 +458,22 @@ export default function App() {
             <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-tighter border ${isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : isConnecting ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
               <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : isConnecting ? 'bg-amber-500 animate-bounce' : 'bg-rose-500'}`} />
               {isConnected ? 'En Línea' : isConnecting ? 'Conectando...' : 'Desconectado'}
+              {!isConnected && !isConnecting && (
+                <button 
+                  onClick={connectSocket}
+                  className="ml-1 underline cursor-pointer hover:text-rose-900"
+                >
+                  Reintentar
+                </button>
+              )}
             </div>
+            <button 
+              onClick={copyAppLink}
+              className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+              title="Copiar enlace para otros usuarios"
+            >
+              <FileText className="w-3 h-3 opacity-50" />
+            </button>
             <div className="flex items-center gap-1 bg-white/50 px-2 py-0.5 rounded border border-[#141414]/10">
               <span className="text-[8px] font-bold opacity-50 uppercase">Nube:</span>
               <span className="text-[8px] font-mono font-bold">{serverDataCount !== null ? serverDataCount : '?'}</span>
