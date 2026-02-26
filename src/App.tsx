@@ -164,82 +164,81 @@ export default function App() {
     setConnectionError(null);
     console.log('Iniciando conexión socket...');
     
-    // Usar io() sin argumentos es lo más robusto en entornos con proxy
-    // Forzamos que use el protocolo actual (http/https)
-    const newSocket = io(window.location.origin, {
-      path: '/socket.io/',
-      transports: ['polling', 'websocket'],
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
-    });
-    
-    setSocket(newSocket);
-
-    newSocket.on('connect', () => {
-      console.log('Conectado al servidor. ID:', newSocket.id);
-      setIsConnected(true);
-      setIsConnecting(false);
-      setConnectionError(null);
-    });
-
-    newSocket.on('connect_error', (err) => {
-      console.error('Error de conexión:', err.message);
-      setConnectionError(err.message);
-      // No detenemos isConnecting porque socket.io reintenta automáticamente
-    });
-
-    newSocket.on('reconnect', (attemptNumber) => {
-      console.log('Reconectado tras', attemptNumber, 'intentos');
-      setIsConnected(true);
-      setIsConnecting(false);
-      setConnectionError(null);
-    });
-
-    newSocket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('Intento de reconexión:', attemptNumber);
-      setIsConnecting(true);
-    });
-
-    newSocket.on('disconnect', (reason) => {
-      console.log('Desconectado. Razón:', reason);
-      setIsConnected(false);
-      if (reason === 'io server disconnect' || reason === 'transport close' || reason === 'transport error') {
-        setIsConnecting(true);
-      }
-    });
-
-    newSocket.on('init', (initialData: Expediente[]) => {
-      console.log('Received initial data:', initialData.length);
-      setServerDataCount(initialData.length);
+    setTimeout(() => {
+      const newSocket = io({
+        transports: ['websocket'],
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
+        autoConnect: true,
+      });
       
-      if (initialData.length === 0) {
-        const saved = localStorage.getItem('expedientes');
-        if (saved) {
-          try {
-            const localData = JSON.parse(saved);
-            if (localData && Array.isArray(localData) && localData.length > 0) {
-              console.log('Auto-migrating local data to server...');
-              setExpedientes(localData);
-              newSocket.emit('update_expedientes', localData);
-              return;
+      setSocket(newSocket);
+
+      newSocket.on('connect', () => {
+        console.log('Conectado al servidor. ID:', newSocket.id);
+        setIsConnected(true);
+        setIsConnecting(false);
+        setConnectionError(null);
+      });
+
+      newSocket.on('connect_error', (err) => {
+        console.error('Error de conexión:', err.message);
+        setConnectionError(err.message);
+      });
+
+      newSocket.on('reconnect', (attemptNumber) => {
+        console.log('Reconectado tras', attemptNumber, 'intentos');
+        setIsConnected(true);
+        setIsConnecting(false);
+        setConnectionError(null);
+      });
+
+      newSocket.on('reconnect_attempt', (attemptNumber) => {
+        console.log('Intento de reconexión:', attemptNumber);
+        setIsConnecting(true);
+      });
+
+      newSocket.on('disconnect', (reason) => {
+        console.log('Desconectado. Razón:', reason);
+        setIsConnected(false);
+        if (reason === 'io server disconnect' || reason === 'transport close' || reason === 'transport error') {
+          setIsConnecting(true);
+        }
+      });
+
+      newSocket.on('init', (initialData: Expediente[]) => {
+        console.log('Received initial data:', initialData.length);
+        setServerDataCount(initialData.length);
+        
+        if (initialData.length === 0) {
+          const saved = localStorage.getItem('expedientes');
+          if (saved) {
+            try {
+              const localData = JSON.parse(saved);
+              if (localData && Array.isArray(localData) && localData.length > 0) {
+                console.log('Auto-migrating local data to server...');
+                setExpedientes(localData);
+                newSocket.emit('update_expedientes', localData);
+                return;
+              }
+            } catch (e) {
+              console.error('Error parsing local data', e);
             }
-          } catch (e) {
-            console.error('Error parsing local data', e);
           }
         }
-      }
-      
-      setExpedientes(initialData);
-    });
+        
+        setExpedientes(initialData);
+      });
 
-    newSocket.on('sync_expedientes', (syncedData: Expediente[]) => {
-      console.log('Received synced data:', syncedData.length);
-      setServerDataCount(syncedData.length);
-      setExpedientes(syncedData);
-      localStorage.setItem('expedientes', JSON.stringify(syncedData));
-    });
+      newSocket.on('sync_expedientes', (syncedData: Expediente[]) => {
+        console.log('Received synced data:', syncedData.length);
+        setServerDataCount(syncedData.length);
+        setExpedientes(syncedData);
+        localStorage.setItem('expedientes', JSON.stringify(syncedData));
+      });
+    }, 100);
 
     return newSocket;
   };
