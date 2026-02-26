@@ -152,6 +152,7 @@ export default function App() {
   const [socket, setSocket] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [serverDataCount, setServerDataCount] = useState<number | null>(null);
 
   const connectSocket = () => {
@@ -160,47 +161,52 @@ export default function App() {
     }
     
     setIsConnecting(true);
-    console.log('Initializing socket connection...');
+    setConnectionError(null);
+    console.log('Iniciando conexión socket...');
     
+    // Usar io() sin argumentos es lo más robusto en entornos con proxy
+    // Forzamos que use el protocolo actual (http/https)
     const newSocket = io(window.location.origin, {
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
+      path: '/socket.io/',
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
       timeout: 20000,
-      autoConnect: true,
-      forceNew: true
     });
     
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
-      console.log('Connected to server with ID:', newSocket.id);
+      console.log('Conectado al servidor. ID:', newSocket.id);
       setIsConnected(true);
       setIsConnecting(false);
+      setConnectionError(null);
     });
 
     newSocket.on('connect_error', (err) => {
-      console.error('Socket connection error:', err.message);
-      // Don't set isConnecting to false here, let it retry
+      console.error('Error de conexión:', err.message);
+      setConnectionError(err.message);
+      // No detenemos isConnecting porque socket.io reintenta automáticamente
     });
 
     newSocket.on('reconnect', (attemptNumber) => {
-      console.log('Reconnected to server after', attemptNumber, 'attempts');
+      console.log('Reconectado tras', attemptNumber, 'intentos');
       setIsConnected(true);
       setIsConnecting(false);
+      setConnectionError(null);
     });
 
     newSocket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('Attempting to reconnect:', attemptNumber);
+      console.log('Intento de reconexión:', attemptNumber);
       setIsConnecting(true);
     });
 
     newSocket.on('disconnect', (reason) => {
-      console.log('Disconnected from server. Reason:', reason);
+      console.log('Desconectado. Razón:', reason);
       setIsConnected(false);
-      if (reason === 'io server disconnect' || reason === 'transport close') {
+      if (reason === 'io server disconnect' || reason === 'transport close' || reason === 'transport error') {
         setIsConnecting(true);
-        setTimeout(() => newSocket.connect(), 1000);
       }
     });
 
@@ -458,6 +464,9 @@ export default function App() {
             <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-tighter border ${isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : isConnecting ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
               <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : isConnecting ? 'bg-amber-500 animate-bounce' : 'bg-rose-500'}`} />
               {isConnected ? 'En Línea' : isConnecting ? 'Conectando...' : 'Desconectado'}
+              {connectionError && !isConnected && (
+                <span className="ml-1 text-[7px] opacity-50 lowercase">({connectionError})</span>
+              )}
               {!isConnected && !isConnecting && (
                 <button 
                   onClick={connectSocket}

@@ -49,13 +49,15 @@ async function startServer() {
   let expedientes = loadData();
 
   io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
+    console.log(`[Socket] Nuevo cliente conectado: ${socket.id} desde ${socket.handshake.address}`);
+    console.log(`[Socket] Total clientes activos: ${io.engine.clientsCount}`);
 
     // Send initial state
     socket.emit("init", expedientes);
 
     // Handle updates
     socket.on("update_expedientes", (newExpedientes) => {
+      console.log(`[Socket] Actualización recibida de ${socket.id}. Registros: ${newExpedientes.length}`);
       expedientes = newExpedientes;
       saveData(expedientes);
       // Broadcast to all other clients
@@ -64,11 +66,17 @@ async function startServer() {
 
     // Handle manual sync request
     socket.on("get_latest", () => {
+      console.log(`[Socket] Sincronización manual solicitada por ${socket.id}`);
       socket.emit("sync_expedientes", expedientes);
     });
 
-    socket.on("disconnect", () => {
-      console.log("User disconnected:", socket.id);
+    socket.on("error", (err) => {
+      console.error(`[Socket] Error en socket ${socket.id}:`, err);
+    });
+
+    socket.on("disconnect", (reason) => {
+      console.log(`[Socket] Cliente desconectado: ${socket.id}. Razón: ${reason}`);
+      console.log(`[Socket] Clientes restantes: ${io.engine.clientsCount}`);
     });
   });
 
