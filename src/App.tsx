@@ -82,14 +82,14 @@ const ExpedienteRow: React.FC<ExpedienteRowProps> = ({ exp, onDelete, onEdit, on
       <div className="font-serif italic text-sm truncate" title={exp.asunto}>{exp.asunto}</div>
       <div className="flex flex-col">
         {exp.areaServicio.map((item) => (
-          <div key={item.area} className="h-10 flex items-center border-b border-gray-100 last:border-0">
+          <div key={`area-name-${item.area}`} className="h-10 flex items-center border-b border-gray-100 last:border-0">
             <div className="text-[9px] font-bold opacity-70 leading-tight">{item.area}</div>
           </div>
         ))}
       </div>
       <div className="flex flex-col">
         {exp.areaServicio.map((item) => (
-          <div key={item.area} className="h-10 flex flex-col justify-center border-b border-gray-100 last:border-0">
+          <div key={`area-status-${item.area}`} className="h-10 flex flex-col justify-center border-b border-gray-100 last:border-0">
             <div className="flex items-center gap-2">
               <input 
                 type="checkbox" 
