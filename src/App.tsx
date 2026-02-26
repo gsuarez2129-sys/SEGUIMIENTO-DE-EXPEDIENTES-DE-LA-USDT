@@ -153,57 +153,26 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [apiStatus, setApiStatus] = useState<'ok' | 'error' | 'checking'>('checking');
   const [serverDataCount, setServerDataCount] = useState<number | null>(null);
 
-  const checkApi = async () => {
-    try {
-      setApiStatus('checking');
-      const res = await fetch('/api/status');
-      if (res.ok) {
-        setApiStatus('ok');
-        return true;
-      }
-      setApiStatus('error');
-      return false;
-    } catch (e) {
-      setApiStatus('error');
-      return false;
-    }
-  };
-
-  const connectSocket = async () => {
+  const connectSocket = () => {
     if (socket) {
       socket.disconnect();
     }
     
     setIsConnecting(true);
     setConnectionError(null);
+    console.log('Iniciando conexión socket profesional...');
     
-    // Primero verificamos si la API responde
-    const isApiOk = await checkApi();
-    if (!isApiOk) {
-      setConnectionError('API no responde');
-      setIsConnecting(false);
-      return;
-    }
-
-    const socketOptions = {
-      path: '/socket.io/',
+    // Dejamos que socket.io maneje la URL automáticamente (relativa al origen)
+    const newSocket = io({
       transports: ['polling', 'websocket'],
-      upgrade: true,
-      rememberUpgrade: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 10000,
-      timeout: 15000,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
       autoConnect: true,
-      forceNew: true
-    };
-
-    console.log('Iniciando conexión socket con opciones:', socketOptions.transports);
-    
-    const newSocket = io(socketOptions);
+    });
     
     setSocket(newSocket);
 
@@ -216,7 +185,8 @@ export default function App() {
 
     newSocket.on('connect_error', (err) => {
       console.error('Error de conexión:', err.message);
-      setConnectionError(err.message);
+      setConnectionError(`Error: ${err.message}`);
+      // No detenemos isConnecting porque socket.io reintenta automáticamente
     });
 
     newSocket.on('reconnect', (attemptNumber) => {
@@ -275,11 +245,7 @@ export default function App() {
 
   // Initialize Socket.io
   useEffect(() => {
-    let s: any;
-    const init = async () => {
-      s = await connectSocket();
-    };
-    init();
+    const s = connectSocket();
     return () => {
       if (s) s.close();
     };
@@ -499,9 +465,6 @@ export default function App() {
               {isConnected ? 'En Línea' : isConnecting ? 'Conectando...' : 'Desconectado'}
               {connectionError && !isConnected && (
                 <span className="ml-1 text-[7px] opacity-50 lowercase">({connectionError})</span>
-              )}
-              {apiStatus === 'error' && !isConnected && (
-                <span className="ml-1 text-[7px] text-rose-600 font-bold">API Error</span>
               )}
               {!isConnected && !isConnecting && (
                 <button 

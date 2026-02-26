@@ -46,6 +46,14 @@ async function startServer() {
     allowEIO3: true,
     transports: ["polling", "websocket"],
     connectTimeout: 45000,
+    pingTimeout: 30000,
+    pingInterval: 10000
+  });
+
+  // Global error handler for the app
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("[Server] Error no controlado:", err);
+    res.status(500).json({ error: "Internal Server Error" });
   });
 
   let expedientes = loadData();
@@ -83,6 +91,8 @@ async function startServer() {
   });
 
   // API routes
+  app.get("/health", (req, res) => res.send("OK"));
+  
   app.get("/api/status", (req, res) => {
     res.json({ 
       status: "ok",
