@@ -172,6 +172,17 @@ export default function App() {
     } catch (e) {
       console.error('[REST] Error de red:', e);
     }
+    // Si falla el REST, intentamos cargar de local storage como último recurso
+    const saved = localStorage.getItem('expedientes');
+    if (saved) {
+      try {
+        const localData = JSON.parse(saved);
+        setExpedientes(localData);
+        console.log('[Local] Cargados datos de emergencia desde almacenamiento local');
+      } catch (err) {
+        console.error('[Local] Error cargando datos locales', err);
+      }
+    }
     return false;
   };
 
@@ -205,12 +216,13 @@ export default function App() {
     // o podemos manejarlo nosotros para mayor control.
     const newSocket = io(window.location.origin, {
       path: '/socket.io/',
-      transports: ['polling', 'websocket'],
-      reconnectionAttempts: 5,
-      reconnectionDelay: 2000,
-      timeout: 10000,
+      transports: ['polling', 'websocket'], // Permitir ambos
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      timeout: 20000,
       autoConnect: true,
       forceNew: true,
+      withCredentials: true
     } as any);
     
     setSocket(newSocket);
@@ -238,7 +250,12 @@ export default function App() {
 
     newSocket.on('connect_error', (err) => {
       console.error('[Socket] Error de conexión:', err.message);
-      setConnectionError(err.message);
+      
+      let friendlyError = 'Error de red';
+      if (err.message.includes('xhr poll error')) friendlyError = 'Restricción de red (XHR)';
+      else if (err.message.includes('timeout')) friendlyError = 'Tiempo agotado';
+      
+      setConnectionError(friendlyError);
       
       // Si falla, activamos el modo REST para no bloquear al usuario
       setUseRestFallback(true);
@@ -285,10 +302,20 @@ export default function App() {
   // Initialize Socket.io
   useEffect(() => {
     const s = connectSocket();
+    
+    // Ciclo de sincronización REST de respaldo si el socket no está conectado
+    const interval = setInterval(() => {
+      if (!isConnected) {
+        console.log('[Sync] Ciclo de sincronización REST de respaldo');
+        fetchExpedientesRest();
+      }
+    }, 30000);
+
     return () => {
       if (s) s.close();
+      clearInterval(interval);
     };
-  }, []);
+  }, [isConnected]);
 
   const uploadLocalToServer = () => {
     const saved = localStorage.getItem('expedientes');
@@ -308,11 +335,13 @@ export default function App() {
   };
 
   const forceSync = () => {
-    if (socket) {
-      socket.emit('get_latest'); // We'll add this handler to server
-    } else {
-      window.location.reload();
-    }
+    setIsConnecting(true);
+    fetchExpedientesRest().then(() => {
+      if (socket && isConnected) {
+        socket.emit('get_latest');
+      }
+      setTimeout(() => setIsConnecting(false), 1000);
+    });
   };
 
   // Sync with server on change
@@ -326,9 +355,12 @@ export default function App() {
   const syncWithServer = (newExpedientes: Expediente[]) => {
     setExpedientes(newExpedientes);
     localStorage.setItem('expedientes', JSON.stringify(newExpedientes));
+    
     if (isConnected && socket) {
+      console.log('[Sync] Enviando actualización vía Socket');
       socket.emit('update_expedientes', newExpedientes);
-    } else if (useRestFallback) {
+    } else {
+      console.log('[Sync] Enviando actualización vía REST (Fallback)');
       saveExpedientesRest(newExpedientes);
     }
   };
@@ -504,8 +536,8 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-tight uppercase">Seguimiento de Expedientes - USDT</h1>
             <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-tighter border ${isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : isConnecting ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
               <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : isConnecting ? 'bg-amber-500 animate-bounce' : 'bg-rose-500'}`} />
-              {isConnected ? `En Línea (${transportType})` : isConnecting ? 'Conectando...' : useRestFallback ? 'Modo Seguro (REST)' : 'Desconectado'}
-              {connectionError && !isConnected && (
+              {isConnected ? `En Línea (${transportType})` : isConnecting ? 'Conectando...' : useRestFallback ? 'Sincronización Activa (REST)' : 'Sin Conexión'}
+              {connectionError && !isConnected && !useRestFallback && (
                 <span className="ml-1 text-[7px] opacity-70 lowercase">({connectionError})</span>
               )}
               {!isConnected && (

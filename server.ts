@@ -39,15 +39,12 @@ async function startServer() {
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
-      origin: (origin, callback) => {
-        // Permitir cualquier origen en este entorno de desarrollo/preview
-        callback(null, true);
-      },
+      origin: true,
       methods: ["GET", "POST"],
       credentials: true
     },
     allowEIO3: true,
-    transports: ["polling", "websocket"],
+    transports: ["polling", "websocket"], // Permitir ambos para máxima compatibilidad
     connectTimeout: 45000,
     pingTimeout: 30000,
     pingInterval: 10000
