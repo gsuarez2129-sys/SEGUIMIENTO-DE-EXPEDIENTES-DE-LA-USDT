@@ -39,7 +39,10 @@ async function startServer() {
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: (origin, callback) => {
+        // Permitir cualquier origen en este entorno de desarrollo/preview
+        callback(null, true);
+      },
       methods: ["GET", "POST"],
       credentials: true
     },
@@ -50,10 +53,13 @@ async function startServer() {
     pingInterval: 10000
   });
 
-  // Global error handler for the app
-  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error("[Server] Error no controlado:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+  // Global error handlers to prevent server crashes
+  process.on("uncaughtException", (err) => {
+    console.error("[Server] FATAL: Uncaught Exception:", err);
+  });
+
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error("[Server] FATAL: Unhandled Rejection at:", promise, "reason:", reason);
   });
 
   let expedientes = loadData();

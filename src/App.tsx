@@ -203,18 +203,30 @@ export default function App() {
 
     // Configuración experta: Intentamos WebSocket primero, si falla Socket.io bajará a Polling automáticamente
     // o podemos manejarlo nosotros para mayor control.
-    const newSocket = io({
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
+    const newSocket = io(window.location.origin, {
+      path: '/socket.io/',
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 5,
       reconnectionDelay: 2000,
-      timeout: 15000,
+      timeout: 10000,
       autoConnect: true,
-      forceNew: true
-    });
+      forceNew: true,
+    } as any);
     
     setSocket(newSocket);
 
+    // Timeout de seguridad para no quedar en "Conectando" indefinidamente
+    const connectionTimeout = setTimeout(() => {
+      if (!newSocket.connected) {
+        console.warn('[Socket] Timeout de conexión inicial alcanzado');
+        setIsConnecting(false);
+        setUseRestFallback(true);
+        setConnectionError('Tiempo de espera agotado');
+      }
+    }, 12000);
+
     newSocket.on('connect', () => {
+      clearTimeout(connectionTimeout);
       const transport = (newSocket as any).io?.engine?.transport?.name || 'unknown';
       console.log(`[Socket] Conectado con éxito. ID: ${newSocket.id} | Transporte: ${transport}`);
       setIsConnected(true);
@@ -230,7 +242,11 @@ export default function App() {
       
       // Si falla, activamos el modo REST para no bloquear al usuario
       setUseRestFallback(true);
-      // No detenemos isConnecting para permitir que socket.io siga intentando en segundo plano
+      
+      // Si ya pasaron varios intentos, dejamos de mostrar el spinner de carga
+      if ((newSocket as any).io?.reconnecting === false || (newSocket as any).io?._reconnectionAttempts >= 3) {
+        setIsConnecting(false);
+      }
     });
 
     newSocket.on('reconnect', (attemptNumber) => {
